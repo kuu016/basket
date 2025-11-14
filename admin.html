@@ -1,0 +1,157 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <title>管理者ページ - 部員名簿管理</title>
+    <script src="https://www.gstatic.com/firebasejs/8.10.0/firebase-app.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/8.10.0/firebase-firestore.js"></script>
+    <style>
+        body { font-family: sans-serif; margin: 20px; background: #f9f9f9; }
+        .container { max-width: 600px; margin: 0 auto; padding: 20px; background: #fff; border-radius: 8px; box-shadow: 0 2px 5px rgba(0,0,0,0.1); }
+        h1 { text-align: center; }
+        .form-group { margin-bottom: 15px; }
+        #new-member-name { width: 70%; padding: 10px; font-size: 16px; border: 1px solid #ccc; border-radius: 4px; }
+        #add-member-btn { width: 28%; padding: 10px; font-size: 16px; background: #007bff; color: #fff; border: none; border-radius: 4px; cursor: pointer; }
+        #member-list { list-style: none; padding: 0; }
+        .member-item { display: flex; justify-content: space-between; align-items: center; padding: 10px; border-bottom: 1px solid #eee; }
+        .delete-btn { background: #dc3545; color: #fff; border: none; padding: 5px 10px; border-radius: 4px; cursor: pointer; }
+    </style>
+</head>
+<body>
+
+    <div class="container">
+        <h1>部員名簿の管理</h1>
+        <div class="form-group">
+            <input type="text" id="new-member-name" placeholder="新しい部員の名前">
+            <button id="add-member-btn">追加</button>
+        </div>
+        <hr>
+        <h2>現在の部員リスト</h2>
+        <ul id="member-list">
+            </ul>
+    </div>
+
+    <script>
+        // ----------------------------------------------------
+        // ★★★ 1. 管理者パスワード ★★★
+        // あなただけが知っている秘密のパスワードに変更してください
+        // ----------------------------------------------------
+        const ADMIN_PASSWORD = "jwubasket";
+
+        // ----------------------------------------------------
+        // ★★★ 2. Firebase設定 ★★★
+        // index.html と同じ `firebaseConfig` の内容を貼り付け
+        // ----------------------------------------------------
+        const firebaseConfig = {
+            apiKey: "AIzaSyDhVZzK6odaifuq8al3LI2CEpFIzfncrpI",
+            authDomain: "robust-seat-478204-f4.firebaseapp.com",
+            projectId: "robust-seat-478204-f4",
+            storageBucket: "robust-seat-478204-f4.firebasestorage.app",
+            messagingSenderId: "303092623602",
+            appId: "1:303092623602:web:741edf31789712823a486b",
+            measurementId: "G-FXZHKNDYV0"
+          };
+
+        // --- これより下は変更不要です ---
+
+        // Firebase初期化
+        firebase.initializeApp(firebaseConfig);
+        const db = firebase.firestore();
+
+        document.addEventListener('DOMContentLoaded', () => {
+            // パスワード認証
+            const pass = prompt('管理者パスワードを入力してください');
+            if (pass !== ADMIN_PASSWORD) {
+                alert('パスワードが違います');
+                document.body.innerHTML = '<h1>アクセスが拒否されました</h1>';
+                return;
+            }
+
+            // 認証成功したら機能初期化
+            loadMembers();
+            document.getElementById('add-member-btn').addEventListener('click', addMember);
+            document.getElementById('member-list').addEventListener('click', handleDeleteClick);
+        });
+
+        // 部員リストを読み込む
+        async function loadMembers() {
+            const listEl = document.getElementById('member-list');
+            listEl.innerHTML = '<li>読み込み中...</li>';
+            
+            try {
+                const snapshot = await db.collection('members').orderBy('name').get();
+                listEl.innerHTML = ''; // クリア
+                if (snapshot.empty) {
+                    listEl.innerHTML = '<li>まだ部員が登録されていません</li>';
+                    return;
+                }
+                snapshot.forEach(doc => {
+                    const member = doc.data();
+                    const li = document.createElement('li');
+                    li.className = 'member-item';
+                    li.dataset.id = doc.id;
+                    li.innerHTML = `
+                        <span>${member.name}</span>
+                        <button class="delete-btn">削除</button>
+                    `;
+                    listEl.appendChild(li);
+                });
+            } catch (error) {
+                console.error("部員名簿の読み込み失敗:", error);
+                listEl.innerHTML = '<li>読み込みに失敗しました</li>';
+            }
+        }
+
+        // 部員を追加する
+        async function addMember() {
+            const nameInput = document.getElementById('new-member-name');
+            const name = nameInput.value.trim();
+            
+            if (!name) {
+                alert('名前を入力してください');
+                return;
+            }
+
+            if (confirm(`「${name}」さんを名簿に追加しますか？`)) {
+                try {
+                    await db.collection('members').add({
+                        name: name
+                    });
+                    nameInput.value = ''; // 入力欄をクリア
+                    loadMembers(); // リストを再読み込み
+                } catch (error) {
+                    console.error("部員の追加に失敗:", error);
+                    alert('追加に失敗しました。');
+                }
+            }
+        }
+
+        // 削除ボタンのクリック処理
+        function handleDeleteClick(e) {
+            if (!e.target.classList.contains('delete-btn')) {
+                return;
+            }
+            
+            const li = e.target.closest('.member-item');
+            const memberId = li.dataset.id;
+            const memberName = li.querySelector('span').textContent;
+
+            if (confirm(`「${memberName}」さんを名簿から削除しますか？`)) {
+                deleteMember(memberId);
+            }
+        }
+
+        // 部員を削除する
+        async function deleteMember(memberId) {
+            try {
+                await db.collection('members').doc(memberId).delete();
+                loadMembers(); // リストを再読み込み
+            } catch (error) {
+                console.error("部員の削除に失敗:", error);
+                alert('削除に失敗しました。');
+            }
+        }
+
+    </script>
+</body>
+</html>
