@@ -259,6 +259,8 @@
 
         // カレンダーのイベントをクリックした時の処理
         function handleEventClick(clickInfo) {
+            clickInfo.jsEvent.preventDefault();
+            
             const event = clickInfo.event;
             const modal = document.getElementById('event-detail-modal');
             document.getElementById('event-detail-title').textContent = event.title;
