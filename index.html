@@ -1,0 +1,514 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>出欠管理アプリ</title>
+    <script src="https://www.gstatic.com/firebasejs/8.10.0/firebase-app.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/8.10.0/firebase-firestore.js"></script>
+
+    <script src='https://cdn.jsdelivr.net/npm/fullcalendar@6.1.9/index.global.min.js'></script>
+    
+    <style>
+        /* 基本スタイル */
+        body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, "Noto Sans", sans-serif; margin: 0; background-color: #f4f4f8; color: #333; }
+        .container { max-width: 900px; margin: 15px auto; padding: 15px; background: #fff; border-radius: 8px; box-shadow: 0 4px 12px rgba(0,0,0,0.05); }
+
+        /* タブ切り替え */
+        .tabs { display: flex; border-bottom: 2px solid #ddd; }
+        .tab-button { padding: 12px 20px; cursor: pointer; background: #eee; border: none; font-size: 16px; border-radius: 6px 6px 0 0; margin-right: 5px; }
+        .tab-button.active { background: #fff; border: 2px solid #ddd; border-bottom: 2px solid #fff; font-weight: bold; position: relative; top: 2px; }
+        .tab-content { display: none; padding-top: 20px; }
+        .tab-content.active { display: block; }
+        
+        /* 名前確認 */
+        #user-info { text-align: right; margin-bottom: 10px; font-size: 14px; }
+        #user-name { font-weight: bold; }
+        #change-user { color: #007bff; text-decoration: underline; cursor: pointer; font-size: 12px; margin-left: 10px;}
+
+        /* カレンダー */
+        #calendar { max-width: 100%; margin: 0 auto; }
+        :root { --fc-event-bg-color: #007bff; --fc-event-border-color: #007bff; }
+        .fc-event-title { font-weight: bold; }
+
+        /* 出欠登録リスト */
+        .event-list { list-style: none; padding: 0; }
+        .event-item { border: 1px solid #ddd; border-radius: 8px; margin-bottom: 15px; padding: 15px; background: #fafafa; }
+        .event-item h3 { margin: 0 0 10px; }
+        .event-meta { font-size: 14px; color: #555; margin-bottom: 12px; }
+        .status-buttons { display: flex; flex-wrap: wrap; gap: 10px; }
+        .status-button { border: 2px solid #ccc; background: #fff; padding: 8px 14px; border-radius: 20px; cursor: pointer; font-size: 14px; font-weight: 500; }
+        .status-button.active { font-weight: bold; color: #fff; }
+        .status-button.attend.active { background: #28a745; border-color: #28a745; }
+        .status-button.absent.active { background: #dc3545; border-color: #dc3545; }
+        .status-button.undecided.active { background: #ffc107; border-color: #ffc107; }
+        .reason-input { width: 100%; box-sizing: border-box; padding: 8px; border: 1px solid #ccc; border-radius: 4px; margin-top: 10px; display: none; }
+        .submit-attendance { background: #007bff; color: #fff; border: none; padding: 10px 16px; border-radius: 5px; cursor: pointer; font-size: 15px; margin-top: 10px; }
+        .submit-attendance:hover { background: #0056b3; }
+        .last-updated { font-size: 12px; color: #777; margin-top: 10px; }
+
+        /* モーダル (名前選択 / カレンダー詳細) */
+        .modal-overlay { position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.6); display: flex; align-items: center; justify-content: center; z-index: 100; }
+        .modal-content { background: #fff; padding: 25px; border-radius: 8px; width: 90%; max-width: 400px; }
+        #name-modal h2 { margin-top: 0; }
+        #name-select { width: 100%; padding: 10px; font-size: 16px; }
+        #confirm-name { width: 100%; padding: 10px; font-size: 16px; background: #007bff; color: #fff; border: none; border-radius: 5px; margin-top: 15px; cursor: pointer; }
+        
+        #event-detail-modal h3 { margin-top: 0; }
+        #attendance-status-list { list-style: none; padding: 0; }
+        #attendance-status-list li { padding: 5px 0; }
+        #attendance-status-list .reason { font-size: 12px; color: #555; padding-left: 15px; }
+
+    </style>
+</head>
+<body>
+
+    <div class="container">
+        <div id="user-info">
+            こんにちは、<span id="user-name">ゲスト</span> さん
+            <span id="change-user">[ユーザー変更]</span>
+        </div>
+
+        <div class="tabs">
+            <button class="tab-button active" data-tab="calendar-tab">カレンダー</button>
+            <button class="tab-button" data-tab="attendance-tab">出欠登録</button>
+        </div>
+
+        <div id="calendar-tab" class="tab-content active">
+            <div id="calendar"></div>
+        </div>
+
+        <div id="attendance-tab" class="tab-content">
+            <h2>出欠登録</h2>
+            <p>各練習の出欠を登録してください。</p>
+            <div id="loading-events">練習予定を読み込み中...</div>
+            <ul class="event-list" id="attendance-event-list">
+                </ul>
+        </div>
+    </div>
+
+    <div id="name-modal" class="modal-overlay">
+        <div class="modal-content">
+            <h2>あなたの名前を選んでください</h2>
+            <select id="name-select">
+                <option value="">読み込み中...</option>
+            </select>
+            <button id="confirm-name">決定</button>
+        </div>
+    </div>
+
+    <div id="event-detail-modal" class="modal-overlay" style="display: none;">
+        <div class="modal-content">
+            <h3 id="event-detail-title"></h3>
+            <p id="event-detail-time"></p>
+            <hr>
+            <h4>出欠状況</h4>
+            <div id="event-detail-loading">読み込み中...</div>
+            <ul id="attendance-status-list"></ul>
+            <button id="close-detail-modal">閉じる</button>
+        </div>
+    </div>
+
+
+    <script>
+        // ----------------------------------------------------
+        // ★★★ 1. Firebase設定 ★★★
+        // Firebaseコンソールでコピーした `firebaseConfig` を貼り付け
+        // ----------------------------------------------------
+       const firebaseConfig = {
+  apiKey: "AIzaSyDhVZzK6odaifuq8al3LI2CEpFIzfncrpI",
+  authDomain: "robust-seat-478204-f4.firebaseapp.com",
+  projectId: "robust-seat-478204-f4",
+  storageBucket: "robust-seat-478204-f4.firebasestorage.app",
+  messagingSenderId: "303092623602",
+  appId: "1:303092623602:web:741edf31789712823a486b",
+  measurementId: "G-FXZHKNDYV0"
+};
+
+        // ----------------------------------------------------
+        // ★★★ 2. Google Calendar APIキー ★★★
+        // Google Cloudコンソールで取得した「APIキー」を貼り付け
+        // ----------------------------------------------------
+        const GOOGLE_CALENDAR_API_KEY = "AIzaSyB37DF2Ftefbm1fjrcSlTrkmsqn0EXQyTU";
+
+        // ----------------------------------------------------
+        // ★★★ 3. GoogleカレンダーID ★★★
+        // 公開設定にした「平日練習」「休日練習」カレンダーのIDを配列で入力
+        // (IDはカレンダーの「設定と共有」>「カレンダーの統合」にあります)
+        // ----------------------------------------------------
+        const CALENDAR_IDS = [
+            "9340d0c6ca07d3e82aaee96209420b28eb567598c3399d74beebfdd4377ce118@group.calendar.google.com",
+            "jwubasket@gmail.com"
+        ];
+
+        // --- これより下は変更不要です ---
+
+        // Firebase初期化
+        firebase.initializeApp(firebaseConfig);
+        const db = firebase.firestore();
+
+        let currentUserName = null;
+        let calendar = null;
+        let allCalendarEvents = []; // 出欠登録タブ用の全イベントキャッシュ
+
+        document.addEventListener('DOMContentLoaded', () => {
+            initTabs();
+            initNameCheck();
+            initCalendar();
+            
+            document.getElementById('change-user').addEventListener('click', clearUser);
+            document.getElementById('confirm-name').addEventListener('click', selectUser);
+        });
+
+        // 1. 名前の確認と選択
+        function initNameCheck() {
+            currentUserName = localStorage.getItem('userName');
+            if (currentUserName) {
+                document.getElementById('user-name').textContent = currentUserName;
+                document.getElementById('name-modal').style.display = 'none';
+                // ログイン済なら出欠登録タブもロード
+                loadAttendanceForm();
+            } else {
+                document.getElementById('name-modal').style.display = 'flex';
+                loadMemberNames();
+            }
+        }
+
+        async function loadMemberNames() {
+            const selectEl = document.getElementById('name-select');
+            selectEl.innerHTML = '<option value="">名前を選んでください</option>';
+            try {
+                const snapshot = await db.collection('members').orderBy('name').get();
+                if (snapshot.empty) {
+                    selectEl.innerHTML = '<option value="">管理者が名簿を登録中です</option>';
+                    return;
+                }
+                snapshot.forEach(doc => {
+                    const name = doc.data().name;
+                    selectEl.innerHTML += `<option value="${name}">${name}</option>`;
+                });
+            } catch (error) {
+                console.error("部員名簿の読み込みに失敗:", error);
+                selectEl.innerHTML = '<option value="">読み込み失敗</option>';
+            }
+        }
+
+        function selectUser() {
+            const selectedName = document.getElementById('name-select').value;
+            if (selectedName) {
+                currentUserName = selectedName;
+                localStorage.setItem('userName', currentUserName);
+                document.getElementById('user-name').textContent = currentUserName;
+                document.getElementById('name-modal').style.display = 'none';
+                // 名前が決定したら出欠フォームをロード
+                loadAttendanceForm();
+            } else {
+                alert('名前を選んでください');
+            }
+        }
+
+        function clearUser() {
+            if (confirm('ユーザーを変更しますか？（保存した名前がリセットされます）')) {
+                localStorage.removeItem('userName');
+                currentUserName = null;
+                document.getElementById('user-name').textContent = 'ゲスト';
+                initNameCheck();
+            }
+        }
+
+        // 2. タブ切り替え
+        function initTabs() {
+            const tabButtons = document.querySelectorAll('.tab-button');
+            const tabContents = document.querySelectorAll('.tab-content');
+
+            tabButtons.forEach(button => {
+                button.addEventListener('click', () => {
+                    tabButtons.forEach(btn => btn.classList.remove('active'));
+                    button.classList.add('active');
+
+                    tabContents.forEach(content => content.classList.remove('active'));
+                    document.getElementById(button.dataset.tab).classList.add('active');
+                });
+            });
+        }
+
+        // 3. カレンダータブ
+        function initCalendar() {
+            const calendarEl = document.getElementById('calendar');
+            const eventSources = CALENDAR_IDS.map(id => ({
+                googleCalendarId: id,
+                color: CALENDAR_IDS.indexOf(id) === 0 ? '#007bff' : '#28a745' // 1つ目と2つ目で色分け
+            }));
+
+            calendar = new FullCalendar.Calendar(calendarEl, {
+                initialView: 'dayGridMonth',
+                locale: 'ja',
+                headerToolbar: {
+                    left: 'prev,next today',
+                    center: 'title',
+                    right: 'dayGridMonth,listWeek'
+                },
+                googleCalendarApiKey: GOOGLE_CALENDAR_API_KEY,
+                eventSources: eventSources,
+                eventClick: handleEventClick,
+                eventsSet: cacheEvents // イベントがロード/変更されたらキャッシュを更新
+            });
+            calendar.render();
+        }
+
+        // カレンダーのイベントをクリックした時の処理
+        function handleEventClick(clickInfo) {
+            const event = clickInfo.event;
+            const modal = document.getElementById('event-detail-modal');
+            document.getElementById('event-detail-title').textContent = event.title;
+            
+            let timeText = event.start.toLocaleString(undefined, {
+                month: 'numeric', day: 'numeric', hour: 'numeric', minute: 'numeric'
+            });
+            if (event.end) {
+                timeText += ' - ' + event.end.toLocaleString(undefined, {
+                    hour: 'numeric', minute: 'numeric'
+                });
+            }
+            document.getElementById('event-detail-time').textContent = timeText;
+
+            modal.style.display = 'flex';
+            loadAttendanceStatus(event.id); // Firestoreから出欠状況を読み込む
+
+            document.getElementById('close-detail-modal').onclick = () => {
+                modal.style.display = 'none';
+            };
+        }
+
+        // カレンダー詳細モーダル内の出欠状況を読み込む
+        async function loadAttendanceStatus(eventId) {
+            const listEl = document.getElementById('attendance-status-list');
+            const loadingEl = document.getElementById('event-detail-loading');
+            listEl.innerHTML = '';
+            loadingEl.style.display = 'block';
+
+            try {
+                const snapshot = await db.collection('attendance')
+                                       .where('eventId', '==', eventId)
+                                       .get();
+                
+                if (snapshot.empty) {
+                    listEl.innerHTML = '<li>まだ誰も回答していません</li>';
+                    return;
+                }
+
+                let attend = [], absent = [], undecided = [];
+                snapshot.forEach(doc => {
+                    const data = doc.data();
+                    const item = { name: data.userName, reason: data.reason };
+                    if (data.status === 'attend') attend.push(item);
+                    else if (data.status === 'absent') absent.push(item);
+                    else undecided.push(item);
+                });
+
+                const renderList = (title, list, color) => {
+                    if (list.length > 0) {
+                        let html = `<li><strong style="color:${color};">${title} (${list.length}名)</strong>`;
+                        list.forEach(item => {
+                            html += `<br>・${item.name}`;
+                            if (item.reason) html += `<span class="reason">(${item.reason})</span>`;
+                        });
+                        html += '</li>';
+                        return html;
+                    }
+                    return '';
+                };
+
+                listEl.innerHTML = renderList('出席', attend, '#28a745');
+                listEl.innerHTML += renderList('欠席', absent, '#dc3545');
+                listEl.innerHTML += renderList('未定', undecided, '#ffc107');
+
+            } catch (error) {
+                console.error("出欠状況の読み込み失敗:", error);
+                listEl.innerHTML = '<li>読み込みに失敗しました</li>';
+            } finally {
+                loadingEl.style.display = 'none';
+            }
+        }
+
+        // 4. 出欠登録タブ
+        
+        // カレンダーのイベントがロードされたらキャッシュに保存
+        function cacheEvents(events) {
+            allCalendarEvents = events.map(e => ({
+                id: e.id,
+                title: e.title,
+                start: e.start
+            }));
+            
+            // 日付順にソート（未来の練習を上にする）
+            allCalendarEvents.sort((a, b) => a.start - b.start);
+
+            // ログイン済みならフォームを再描画
+            if(currentUserName) {
+                loadAttendanceForm();
+            }
+        }
+        
+        async function loadAttendanceForm() {
+            if (!currentUserName) return; // 名前が選択されるまで待つ
+
+            const listEl = document.getElementById('attendance-event-list');
+            const loadingEl = document.getElementById('loading-events');
+            
+            if (allCalendarEvents.length === 0) {
+                loadingEl.textContent = '練習予定を読み込み中です... (カレンダータブを一度開くと早くなります)';
+                return;
+            }
+            loadingEl.style.display = 'none';
+            listEl.innerHTML = ''; // リストをクリア
+
+            // ユーザーの既存の回答をまとめて取得
+            const userAttendanceSnap = await db.collection('attendance')
+                                               .where('userName', '==', currentUserName)
+                                               .get();
+            const attendanceMap = new Map();
+            userAttendanceSnap.forEach(doc => {
+                const data = doc.data();
+                attendanceMap.set(data.eventId, data);
+            });
+
+            const now = new Date();
+            // 過去の練習は表示しない
+            const futureEvents = allCalendarEvents.filter(event => event.start >= now);
+            
+            if (futureEvents.length === 0) {
+                 listEl.innerHTML = '<li>登録対象の練習予定がありません</li>';
+                 return;
+            }
+
+            futureEvents.forEach(event => {
+                const eventId = event.id;
+                const userRecord = attendanceMap.get(eventId);
+
+                const li = document.createElement('li');
+                li.className = 'event-item';
+                li.dataset.eventId = eventId;
+
+                const time = event.start.toLocaleString('ja-JP', { 
+                    year: 'numeric', month: 'numeric', day: 'numeric', hour: 'numeric', minute: 'numeric' 
+                });
+                
+                let lastUpdated = '';
+                if (userRecord && userRecord.updatedAt) {
+                    lastUpdated = `<div class="last-updated">最終更新: ${userRecord.updatedAt.toDate().toLocaleString()}</div>`;
+                }
+
+                li.innerHTML = `
+                    <h3>${event.title}</h3>
+                    <div class="event-meta">${time}</div>
+                    <div class="status-buttons">
+                        <button class="status-button attend" data-status="attend">出席</button>
+                        <button class="status-button absent" data-status="absent">欠席</button>
+                        <button class="status-button undecided" data-status="undecided">未定</button>
+                    </div>
+                    <input type="text" class="reason-input" placeholder="理由を入力 (欠席・未定の場合)">
+                    <button class="submit-attendance">登録 / 更新</button>
+                    ${lastUpdated}
+                `;
+                
+                // 既存の回答をフォームに反映
+                if (userRecord) {
+                    li.querySelector(`.status-button[data-status="${userRecord.status}"]`)?.classList.add('active');
+                    const reasonInput = li.querySelector('.reason-input');
+                    if (userRecord.reason) {
+                        reasonInput.value = userRecord.reason;
+                    }
+                    if (userRecord.status === 'absent' || userRecord.status === 'undecided') {
+                        reasonInput.style.display = 'block';
+                    }
+                }
+
+                listEl.appendChild(li);
+            });
+
+            // ボタンイベントの登録 (イベント委譲)
+            listEl.addEventListener('click', handleAttendanceFormClick);
+        }
+        
+        function handleAttendanceFormClick(e) {
+            const target = e.target;
+            
+            // ステータスボタンの処理
+            if (target.classList.contains('status-button')) {
+                const buttons = target.closest('.status-buttons').querySelectorAll('.status-button');
+                buttons.forEach(btn => btn.classList.remove('active'));
+                target.classList.add('active');
+
+                // 理由欄の表示/非表示
+                const reasonInput = target.closest('.event-item').querySelector('.reason-input');
+                if (target.dataset.status === 'absent' || target.dataset.status === 'undecided') {
+                    reasonInput.style.display = 'block';
+                } else {
+                    reasonInput.style.display = 'none';
+                    reasonInput.value = ''; // 出席なら理由をクリア
+                }
+            }
+            
+            // 登録ボタンの処理
+            if (target.classList.contains('submit-attendance')) {
+                submitAttendance(target.closest('.event-item'));
+            }
+        }
+        
+        async function submitAttendance(eventItem) {
+            const eventId = eventItem.dataset.eventId;
+            const activeStatusButton = eventItem.querySelector('.status-button.active');
+            
+            if (!activeStatusButton) {
+                alert('出席、欠席、未定のいずれかを選んでください');
+                return;
+            }
+
+            const status = activeStatusButton.dataset.status;
+            const reasonInput = eventItem.querySelector('.reason-input');
+            const reason = (status === 'absent' || status === 'undecided') ? reasonInput.value : '';
+
+            const docId = `${eventId}_${currentUserName}`; // `イベントID_ユーザー名` をドキュメントIDにして重複登録を防ぐ
+            
+            const data = {
+                userName: currentUserName,
+                eventId: eventId,
+                eventTitle: eventItem.querySelector('h3').textContent, // 参考用にタイトルも保存
+                status: status,
+                reason: reason,
+                updatedAt: firebase.firestore.FieldValue.serverTimestamp() // A案: 最新の更新日時
+            };
+
+            const button = eventItem.querySelector('.submit-attendance');
+            button.textContent = '登録中...';
+            button.disabled = true;
+
+            try {
+                // setメソッドでドキュメントIDを指定して書き込む (存在すれば上書き)
+                await db.collection('attendance').doc(docId).set(data);
+                
+                alert('出欠を登録しました');
+                button.textContent = '登録 / 更新';
+                button.disabled = false;
+                
+                // 最終更新日時を画面に反映
+                const lastUpdatedEl = eventItem.querySelector('.last-updated');
+                const newTimeText = `最終更新: ${new Date().toLocaleString()}`;
+                if (lastUpdatedEl) {
+                    lastUpdatedEl.textContent = newTimeText;
+                } else {
+                    eventItem.insertAdjacentHTML('beforeend', `<div class="last-updated">${newTimeText}</div>`);
+                }
+
+            } catch (error) {
+                console.error("出欠の登録に失敗:", error);
+                alert('登録に失敗しました。');
+                button.textContent = '登録 / 更新';
+                button.disabled = false;
+            }
+        }
+
+    </script>
+</body>
+</html>
