@@ -350,6 +350,7 @@
                 id: e.id,
                 title: e.title,
                 start: e.start
+                calendarId: e.source.internalEventSource.meta.googleCalendarId
             }));
             
             // 日付順にソート（未来の練習を上にする）
@@ -387,8 +388,14 @@
             const now = new Date();
             // 過去の練習は表示しない
             const futureEvents = allCalendarEvents.filter(event => event.start >= now);
+
+            // ステップ1で指定したIDで、さらに絞り込む
+            const attendanceTargetEvents = futureEvents.filter(event => 
+                event.calendarId === ATTENDANCE_CALENDAR_ID
+            );
+
             
-            if (futureEvents.length === 0) {
+            if (attendanceTargetEvents.length === 0) {
                  listEl.innerHTML = '<li>登録対象の練習予定がありません</li>';
                  return;
             }
