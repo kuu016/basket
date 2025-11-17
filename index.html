@@ -502,6 +502,82 @@
                 alert('出席、欠席、未定のいずれかを選んでください');
                 return;
             }
+    // ↓↓↓↓ この関数を丸ごと追加 ↓↓↓↓
+        // ----------------------------------------------------
+        // 一括登録ボタンの処理
+        // ----------------------------------------------------
+        async function submitAllAttendance() {
+            if (!currentUserName) {
+                alert('ユーザーが選択されていません。');
+                return;
+            }
+
+            const allEventItems = document.querySelectorAll('#attendance-event-list .event-item');
+            if (allEventItems.length === 0) {
+                alert('登録対象の予定がありません');
+                return;
+            }
+
+            // Firestoreのバッチ処理を開始
+            const batch = db.batch();
+            let selectedCount = 0; // 登録対象の件数
+            
+            // 全リストアイテムをループ
+            allEventItems.forEach(eventItem => {
+                const activeStatusButton = eventItem.querySelector('.status-button.active');
+                
+                // ステータスが選択されているものだけを処理対象にする
+                if (activeStatusButton) {
+                    selectedCount++;
+                    const eventId = eventItem.dataset.eventId;
+                    const status = activeStatusButton.dataset.status;
+                    const reasonInput = eventItem.querySelector('.reason-input');
+                    const reason = (status === 'absent' || status === 'undecided') ? reasonInput.value : '';
+                    const docId = `${eventId}_${currentUserName}`;
+
+                    const data = {
+                        userName: currentUserName,
+                        eventId: eventId,
+                        eventTitle: eventItem.querySelector('h3').textContent,
+                        status: status,
+                        reason: reason,
+                        updatedAt: firebase.firestore.FieldValue.serverTimestamp()
+                    };
+                    
+                    // バッチに書き込み操作を追加
+                    const docRef = db.collection('attendance').doc(docId);
+                    batch.set(docRef, data);
+                }
+            }); // ループ終わり
+
+            if (selectedCount === 0) {
+                alert('ステータス（出席・欠席・未定）が選択されている予定がありません。');
+                return;
+            }
+
+            const button = document.getElementById('submit-all-attendance');
+            button.textContent = `登録中... (${selectedCount}件)`;
+            button.disabled = true;
+
+            try {
+                // バッチ処理をまとめて実行
+                await batch.commit();
+                
+                alert(`${selectedCount}件の出欠を一括登録しました`);
+                button.textContent = '選択した予定をすべて一括登録';
+                button.disabled = false;
+                
+                // 登録が成功したら、リストを再読み込みして「最終更新日時」を反映
+                loadAttendanceForm();
+
+            } catch (error) {
+                console.error("一括登録に失敗:", error);
+                alert('一括登録に失敗しました。');
+                button.textContent = '選択した予定をすべて一括登録';
+                button.disabled = false;
+            }
+        }
+        // ↑↑↑↑ ここまでを丸ごと追加 ↑↑↑↑
 
             const status = activeStatusButton.dataset.status;
             const reasonInput = eventItem.querySelector('.reason-input');
