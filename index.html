@@ -502,6 +502,51 @@
                 alert('出席、欠席、未定のいずれかを選んでください');
                 return;
             }
+
+
+            const status = activeStatusButton.dataset.status;
+            const reasonInput = eventItem.querySelector('.reason-input');
+            const reason = (status === 'absent' || status === 'undecided') ? reasonInput.value : '';
+
+            const docId = `${eventId}_${currentUserName}`; // `イベントID_ユーザー名` をドキュメントIDにして重複登録を防ぐ
+            
+            const data = {
+                userName: currentUserName,
+                eventId: eventId,
+                eventTitle: eventItem.querySelector('h3').textContent, // 参考用にタイトルも保存
+                status: status,
+                reason: reason,
+                updatedAt: firebase.firestore.FieldValue.serverTimestamp() // A案: 最新の更新日時
+            };
+
+            const button = eventItem.querySelector('.submit-attendance');
+            button.textContent = '登録中...';
+            button.disabled = true;
+
+            try {
+                // setメソッドでドキュメントIDを指定して書き込む (存在すれば上書き)
+                await db.collection('attendance').doc(docId).set(data);
+                
+                alert('出欠を登録しました');
+                button.textContent = '登録 / 更新';
+                button.disabled = false;
+                
+                // 最終更新日時を画面に反映
+                const lastUpdatedEl = eventItem.querySelector('.last-updated');
+                const newTimeText = `最終更新: ${new Date().toLocaleString()}`;
+                if (lastUpdatedEl) {
+                    lastUpdatedEl.textContent = newTimeText;
+                } else {
+                    eventItem.insertAdjacentHTML('beforeend', `<div class="last-updated">${newTimeText}</div>`);
+                }
+
+            } catch (error) {
+                console.error("出欠の登録に失敗:", error);
+                alert('登録に失敗しました。');
+                button.textContent = '登録 / 更新';
+                button.disabled = false;
+            }
+        }
     // ↓↓↓↓ この関数を丸ごと追加 ↓↓↓↓
         // ----------------------------------------------------
         // 一括登録ボタンの処理
@@ -578,51 +623,6 @@
             }
         }
         // ↑↑↑↑ ここまでを丸ごと追加 ↑↑↑↑
-
-            const status = activeStatusButton.dataset.status;
-            const reasonInput = eventItem.querySelector('.reason-input');
-            const reason = (status === 'absent' || status === 'undecided') ? reasonInput.value : '';
-
-            const docId = `${eventId}_${currentUserName}`; // `イベントID_ユーザー名` をドキュメントIDにして重複登録を防ぐ
-            
-            const data = {
-                userName: currentUserName,
-                eventId: eventId,
-                eventTitle: eventItem.querySelector('h3').textContent, // 参考用にタイトルも保存
-                status: status,
-                reason: reason,
-                updatedAt: firebase.firestore.FieldValue.serverTimestamp() // A案: 最新の更新日時
-            };
-
-            const button = eventItem.querySelector('.submit-attendance');
-            button.textContent = '登録中...';
-            button.disabled = true;
-
-            try {
-                // setメソッドでドキュメントIDを指定して書き込む (存在すれば上書き)
-                await db.collection('attendance').doc(docId).set(data);
-                
-                alert('出欠を登録しました');
-                button.textContent = '登録 / 更新';
-                button.disabled = false;
-                
-                // 最終更新日時を画面に反映
-                const lastUpdatedEl = eventItem.querySelector('.last-updated');
-                const newTimeText = `最終更新: ${new Date().toLocaleString()}`;
-                if (lastUpdatedEl) {
-                    lastUpdatedEl.textContent = newTimeText;
-                } else {
-                    eventItem.insertAdjacentHTML('beforeend', `<div class="last-updated">${newTimeText}</div>`);
-                }
-
-            } catch (error) {
-                console.error("出欠の登録に失敗:", error);
-                alert('登録に失敗しました。');
-                button.textContent = '登録 / 更新';
-                button.disabled = false;
-            }
-        }
-
     </script>
 </body>
 </html>
